@@ -2,28 +2,9 @@
 error_reporting(E_ALL);
 define("NL", "\n\r");
 
-class Server {
-	private $events = array();
-	private $sockets = array();
+class Event{
 	
-	
-	public function Server($port) 
-	{
-		$this->port = $port;
-		$this->serverSocket = socket_create_listen($this->port);
-		$this->sockets[] = $this->serverSocket;
-	}
-	
-	public function log($msg) 
-	{
-		echo trim($msg).NL;
-	}
-	
-	public function getSockets() 
-	{
-		$sockets = $this->sockets;
-		return $sockets;
-	}
+	protected $events = array();
 	
 	public function addEvent($eventName, $callback) 
 	{
@@ -43,13 +24,42 @@ class Server {
 		}
 	}
 	
+	private function getSocketError()
+	{		
+		return socket_strerror(socket_last_error($socket));
+	}
+
+	public function log($msg) 
+	{
+		echo trim($msg).NL;
+	}
+	
+}
+
+class Server extends Socket{
+	
+	private $sockets = array();
+	
+	public function Server($port) 
+	{
+		$this->port = $port;
+		$this->serverSocket = socket_create_listen($this->port);
+		$this->sockets[] = $this->serverSocket;
+	}
+	
+	public function getSockets() 
+	{
+		$sockets = $this->sockets;
+		return $sockets;
+	}
+	
 	public function waitEventFromSockets() 
 	{
 		$clientSockets = $this->sockets;		
 		if (socket_select($clientSockets, $write = NULL, $except = NULL, 0) < 1) return;
 		
 		if(in_array($this->serverSocket, $clientSockets)) {
-			$this->sockets[] = $clientSocket = $this->acceptClient();
+			$this->sockets[] = $clientSocket = socket_accept($this->serverSocket);
 			$this->fireEvent('onClientConnected', array('clientSocket'=>$clientSocket));
 			$key = array_search($this->serverSocket, $clientSockets);
 			unset($clientSockets[$key]);
@@ -65,14 +75,6 @@ class Server {
 				$this->fireEvent('onNewData', array('clientSocket'=>$clientSocket,'data'=>trim($data)));
 			}
 		}		
-	}
-	
-	private function acceptClient()
-	{		
-		if (($clientSocket = socket_accept($this->serverSocket)) === false) {
-			$msg = "socket_accept() failed: reason: " . socket_strerror(socket_last_error($this->serverSocket));			
-		}
-		return $clientSocket;
 	}
 
 	public function run() 
@@ -93,18 +95,19 @@ $server->addEvent("onClientConnected", function($params) use ($server){
 	socket_write($clientSocket, "Welcome\r\n");
 });
 
+$server->addEvent('onClientDisconnected', function() use ($server) {
+	$server->log("Client disconnected! Total: ".(sizeOf($server->getSockets())-1));
+});
+
 $server->addEvent('onNewData', function($params) use ($server)  {
 	extract($params);
 	foreach($server->getSockets() as $socket) {	
 		if ($server->serverSocket == $socket || $clientSocket== $socket)
 			continue;
 		if(trim($data)!="") {
-			socket_write($socket, $data.NL);
+			socket_write($socket, trim($data).NL);
 		}
 	}
 });
 
-$server->addEvent('onClientDisconnected', function() use ($server) {
-	$server->log("Client disconnected! Total: ".(sizeOf($server->getSockets())-1));
-});
 $server->run();
